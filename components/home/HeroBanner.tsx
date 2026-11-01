@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "@/components/HoverPrefetchLink";
 import Image from "next/image";
 import { CategoryTree } from "@/lib/categories";
@@ -103,6 +103,8 @@ export const heroSlides = [
 ];
 
 export default function HeroBanner({ clothingCategory, jewelleryCategory }: HeroBannerProps) {
+  const bannerRef = useRef<HTMLElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
   const [currentSlide, setCurrentSlide] = useState(0);
   const [previousSlide, setPreviousSlide] = useState<number | null>(null);
 
@@ -116,15 +118,27 @@ export default function HeroBanner({ clothingCategory, jewelleryCategory }: Hero
     setCurrentSlide((prev) => (prev - 1 + heroSlides.length) % heroSlides.length);
   }, [currentSlide]);
 
-  // Dedicated 4-second automatic slide advancement
+  // Do not download more slides after the visitor scrolls past the banner.
   useEffect(() => {
+    const banner = bannerRef.current;
+    if (!banner) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsVisible(entry.isIntersecting);
+    });
+    observer.observe(banner);
+    return () => observer.disconnect();
+  }, []);
+
+  // Keep automatic advancement only while the banner is on screen.
+  useEffect(() => {
+    if (!isVisible) return;
     const slideTimer = setInterval(() => {
       if (document.hidden) return;
       setPreviousSlide(currentSlide);
       setCurrentSlide((prev) => (prev + 1) % heroSlides.length);
     }, 4000);
     return () => clearInterval(slideTimer);
-  }, [currentSlide]);
+  }, [currentSlide, isVisible]);
 
   const active = heroSlides[currentSlide];
 
@@ -138,6 +152,7 @@ export default function HeroBanner({ clothingCategory, jewelleryCategory }: Hero
 
   return (
     <section
+      ref={bannerRef}
       className="relative w-full overflow-hidden bg-[#060606] text-white border-b border-[#222] select-none
                  mt-[88px] sm:mt-[96px] lg:mt-[104px]
                  h-[480px] sm:h-[510px] md:h-[530px] lg:h-[540px] xl:h-[580px]
