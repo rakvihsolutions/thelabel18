@@ -21,7 +21,7 @@ export default function LoginForm({ initialError }: { initialError: string | nul
         <div className="relative hidden md:flex md:col-span-5 flex-col justify-between border-r border-white/10 bg-gradient-to-b from-white/[0.04] to-transparent p-12">
           <div className="space-y-3">
             <span className="inline-block rounded-full bg-[#D4AF37]/10 border border-[#D4AF37]/30 px-3.5 py-1.5 text-[10px] font-medium tracking-[0.25em] uppercase text-[#D4AF37]">
-              Restricted Area
+              Restricted Area.
             </span>
             <h2 className="text-3xl font-light tracking-tight text-[#F5F2EB]">
               Administration
