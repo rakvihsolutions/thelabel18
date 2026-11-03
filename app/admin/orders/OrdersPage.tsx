@@ -10,10 +10,7 @@ const supabase = createClient(
 )
 
 export default async function OrdersPage() {
-  const query = supabase
-    .from('orders')
-    .select(
-      `
+  const orderSelection = `
       id, status, subtotal, discount_amount, shipping_amount, total, coupon_code, created_at,
       payment_method, payment_status, razorpay_payment_id,
       shiprocket_order_id, tracking_number, courier_name, shipping_booking_state, shipping_package,
@@ -24,12 +21,30 @@ export default async function OrdersPage() {
         products ( image_url, product_variations ( image_url, image_urls ) )
       )
     `
-    )
-    // Include pending/failed payments so recent checkout attempts remain visible.
 
-  const { data, error } = await query
-    .order('created_at', { ascending: false })
-    .limit(200)
+  // Supabase returns a limited number of rows per request. Fetch every page so
+  // the admin list and its totals include all orders, not just the first 200.
+  const pageSize = 500
+  const data: unknown[] = []
+  let error: { message: string } | null = null
+
+  for (let offset = 0; ; offset += pageSize) {
+    const result = await supabase
+      .from('orders')
+      .select(orderSelection)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(offset, offset + pageSize - 1)
+
+    if (result.error) {
+      error = result.error
+      break
+    }
+
+    const page = result.data ?? []
+    data.push(...page)
+    if (page.length < pageSize) break
+  }
 
   if (error) {
     return (
@@ -49,7 +64,7 @@ export default async function OrdersPage() {
       className="min-h-screen bg-[#FAF7F1] px-4 py-6 md:px-10 md:py-10 font-outfit text-black"
       style={{ colorScheme: 'light' }}
     >
-      <OrdersClient orders={(data ?? []) as unknown as StoreOrder[]} />
+      <OrdersClient orders={data as StoreOrder[]} />
     </div>
   )
 }

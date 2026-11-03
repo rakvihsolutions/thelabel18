@@ -25,6 +25,7 @@ import ShiprocketOrderDialog from './ShiprocketOrderDialog'
 import { syncOrderPayment } from './payment-actions'
 import PaymentResultDialog from './PaymentResultDialog'
 import type { PaymentSyncResult } from '@/lib/payment-status'
+import { syncAllOrderDeliveries } from './shipping-actions'
 
 type OrderItem = OrderPhotoSource & {
     id: string
@@ -353,6 +354,7 @@ export default function OrdersClient({ orders: initialOrders }: { orders: StoreO
     const [updatingId, setUpdatingId] = useState<string | null>(null)
     const [paymentResult, setPaymentResult] = useState<(Partial<PaymentSyncResult> & { orderId: string; message: string; ok: boolean }) | null>(null)
     const [syncingPaymentId, setSyncingPaymentId] = useState<string | null>(null)
+    const [syncingDeliveries, setSyncingDeliveries] = useState(false)
     async function checkPayment(id: string) {
         setSyncingPaymentId(id)
         try {
@@ -361,6 +363,29 @@ export default function OrdersClient({ orders: initialOrders }: { orders: StoreO
             if (result.ok) router.refresh()
         } catch { setPaymentResult({ orderId: id, ok: false, message: 'Unable to sync payment. Please retry.' }) }
         finally { setSyncingPaymentId(null) }
+    }
+
+    async function syncDeliveries() {
+        setSyncingDeliveries(true)
+        try {
+            const result = await syncAllOrderDeliveries()
+            if (!result.success) {
+                toast.error(result.message)
+                return
+            }
+            router.refresh()
+            const summary = `Checked ${result.checked} shipments; updated ${result.updated} to Delivered.`
+            const details = [
+                result.failed ? `${result.failed} could not be checked` : '',
+                result.skippedDuplicates ? `${result.skippedDuplicates} duplicate AWBs skipped` : '',
+            ].filter(Boolean).join('; ')
+            if (result.failed || result.skippedDuplicates) toast.error(`${summary} ${details}.`)
+            else toast.success(summary)
+        } catch {
+            toast.error('Unable to sync Shiprocket deliveries. Please try again.')
+        } finally {
+            setSyncingDeliveries(false)
+        }
     }
 
     const totalRevenue = useMemo(
@@ -411,64 +436,33 @@ export default function OrdersClient({ orders: initialOrders }: { orders: StoreO
 
     return (
         <div className="font-outfit text-[#141414]">
-            <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-3xl border border-[#9c7d23]/20 bg-white/60 backdrop-blur-md px-6 py-6 md:px-8 shadow-[0_8px_30px_rgb(0,0,0,0.04)]">
+            <div className="mb-6 rounded-3xl border border-[#9c7d23]/20 bg-white/60 px-6 py-6 shadow-[0_8px_30px_rgb(0,0,0,0.04)] backdrop-blur-md md:px-8">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight text-black">Orders</h1>
                     <p className="mt-1 text-sm font-medium text-stone-600">
                         {orders.length} order{orders.length === 1 ? '' : 's'} · manage orders, book shipping and view shipment details
                     </p>
                 </div>
-            </div>
-
-            {/* Stat cards */}
-            <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
-                <div className="flex items-center gap-4 rounded-3xl border border-[#9c7d23]/10 bg-white/60 backdrop-blur-md p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:border-[#9c7d23]/30">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#FAF7F1] text-[#9c7d23]">
-                        <Layers size={20} strokeWidth={1.5} />
+                <div className="mt-6 grid grid-cols-2 gap-3 border-t border-[#9c7d23]/15 pt-5 sm:grid-cols-3 xl:grid-cols-5">
+                    <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-[#FAF7F1]/80 p-3 sm:p-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-[#9c7d23]"><Layers size={19} strokeWidth={1.5} /></div>
+                        <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8b8478]">Total Orders</p><p className="mt-1 text-xl font-bold tabular-nums text-[#141414]">{orders.length}</p></div>
                     </div>
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b8478]">Total Orders</p>
-                        <p className="mt-1 text-2xl font-bold tracking-tight text-[#141414]">{orders.length}</p>
+                    <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-emerald-50/70 p-3 sm:p-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-emerald-600"><IndianRupee size={19} strokeWidth={1.5} /></div>
+                        <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8b8478]">Revenue</p><p className="mt-1 whitespace-nowrap text-base font-bold tabular-nums text-[#141414] sm:text-lg">₹{totalRevenue.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p></div>
                     </div>
-                </div>
-
-                <div className="flex items-center gap-4 rounded-3xl border border-[#9c7d23]/10 bg-white/60 backdrop-blur-md p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:border-[#9c7d23]/30">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-600">
-                        <IndianRupee size={20} strokeWidth={1.5} />
+                    <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-amber-50/80 p-3 sm:p-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-amber-600"><Clock size={19} strokeWidth={1.5} /></div>
+                        <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8b8478]">Pending</p><p className="mt-1 text-xl font-bold tabular-nums text-[#141414]">{pendingCount}</p></div>
                     </div>
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b8478]">Revenue</p>
-                        <p className="mt-1 text-2xl font-bold tracking-tight text-[#141414]">₹{totalRevenue.toLocaleString()}</p>
+                    <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-indigo-50/80 p-3 sm:p-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-indigo-600"><CheckCircle2 size={19} strokeWidth={1.5} /></div>
+                        <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8b8478]">Delivered</p><p className="mt-1 text-xl font-bold tabular-nums text-[#141414]">{deliveredCount}</p></div>
                     </div>
-                </div>
-
-                <div className="flex items-center gap-4 rounded-3xl border border-[#9c7d23]/10 bg-white/60 backdrop-blur-md p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:border-[#9c7d23]/30">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-50 text-amber-600">
-                        <Clock size={20} strokeWidth={1.5} />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b8478]">Pending</p>
-                        <p className="mt-1 text-2xl font-bold tracking-tight text-[#141414]">{pendingCount}</p>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-4 rounded-3xl border border-[#9c7d23]/10 bg-white/60 backdrop-blur-md p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:border-[#9c7d23]/30">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-50 text-indigo-600">
-                        <CheckCircle2 size={20} strokeWidth={1.5} />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b8478]">Delivered</p>
-                        <p className="mt-1 text-2xl font-bold tracking-tight text-[#141414]">{deliveredCount}</p>
-                    </div>
-                </div>
-
-                <div className="flex items-center gap-4 rounded-3xl border border-[#9c7d23]/10 bg-white/60 backdrop-blur-md p-5 shadow-[0_4px_20px_rgb(0,0,0,0.03)] transition-all hover:-translate-y-1 hover:shadow-[0_8px_30px_rgb(0,0,0,0.06)] hover:border-[#9c7d23]/30">
-                    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-500">
-                        <XCircle size={20} strokeWidth={1.5} />
-                    </div>
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b8478]">Cancelled</p>
-                        <p className="mt-1 text-2xl font-bold tracking-tight text-[#141414]">{cancelledCount}</p>
+                    <div className="flex min-w-0 items-center gap-3 rounded-2xl bg-rose-50/80 p-3 sm:p-4">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white text-rose-500"><XCircle size={19} strokeWidth={1.5} /></div>
+                        <div className="min-w-0"><p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[#8b8478]">Cancelled</p><p className="mt-1 text-xl font-bold tabular-nums text-[#141414]">{cancelledCount}</p></div>
                     </div>
                 </div>
             </div>
@@ -520,6 +514,10 @@ export default function OrdersClient({ orders: initialOrders }: { orders: StoreO
                         Clear
                     </button>
                 )}
+                <button type="button" onClick={syncDeliveries} disabled={syncingDeliveries} className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2.5 text-sm font-semibold text-indigo-700 disabled:cursor-wait disabled:opacity-60">
+                    {syncingDeliveries && <Loader2 size={15} className="animate-spin" />}
+                    {syncingDeliveries ? 'Syncing deliveries…' : 'Sync deliveries'}
+                </button>
                 <button type="button" onClick={() => router.refresh()} className="rounded-xl border border-[#9c7d23]/20 bg-white px-4 py-2.5 text-sm font-semibold text-[#785e16]">Refresh orders</button>
             </div>
 

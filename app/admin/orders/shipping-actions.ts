@@ -163,3 +163,63 @@ export async function syncOrderDelivery(orderId: string) {
     return { success: false, message: error instanceof Error ? error.message : 'Unable to sync delivery status.' }
   }
 }
+
+/** Reconcile every linked, non-cancelled shipment before showing admin totals. */
+export async function syncAllOrderDeliveries() {
+  try {
+    const db = await requireOrdersAdmin()
+    const candidates: { id: string; status: string | null; tracking_number: string | null }[] = []
+    const pageSize = 500
+
+    for (let offset = 0; ; offset += pageSize) {
+      const { data, error } = await db.from('orders')
+        .select('id, status, tracking_number')
+        .not('tracking_number', 'is', null)
+        .order('created_at', { ascending: false })
+        .range(offset, offset + pageSize - 1)
+      if (error) throw new Error('Unable to load tracked orders for delivery sync.')
+      const page = data ?? []
+      candidates.push(...page)
+      if (page.length < pageSize) break
+    }
+
+    const eligible = candidates.filter(order => order.status !== 'delivered' && order.status !== 'cancelled' && order.tracking_number)
+    const awbCounts = new Map<string, number>()
+    for (const order of eligible) {
+      const awb = order.tracking_number!.trim()
+      awbCounts.set(awb, (awbCounts.get(awb) ?? 0) + 1)
+    }
+    const uniqueOrders = eligible.filter(order => awbCounts.get(order.tracking_number!.trim()) === 1)
+    const skippedDuplicates = eligible.length - uniqueOrders.length
+
+    if (uniqueOrders.length === 0) {
+      return { success: true as const, checked: 0, updated: 0, failed: 0, skippedDuplicates }
+    }
+
+    // Warm the shared token once before tracking several AWBs concurrently.
+    await getShiprocketToken()
+    let updated = 0
+    let failed = 0
+    const concurrency = 4
+    for (let index = 0; index < uniqueOrders.length; index += concurrency) {
+      const batch = uniqueOrders.slice(index, index + concurrency)
+      const results = await Promise.all(batch.map(async order => {
+        try {
+          const awb = order.tracking_number!.trim()
+          const tracking = readShipmentTracking(await trackShipmentByAWB(awb))
+          if (!tracking.delivered) return false
+          return await saveDeliveredShipment(order.id, awb)
+        } catch {
+          failed += 1
+          return false
+        }
+      }))
+      updated += results.filter(Boolean).length
+    }
+
+    revalidatePath('/admin/orders')
+    return { success: true as const, checked: uniqueOrders.length, updated, failed, skippedDuplicates }
+  } catch (error) {
+    return { success: false as const, message: error instanceof Error ? error.message : 'Unable to sync Shiprocket delivery statuses.' }
+  }
+}
