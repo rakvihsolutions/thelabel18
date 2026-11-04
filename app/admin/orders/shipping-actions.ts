@@ -39,6 +39,9 @@ export async function bookOrderShipment(orderId: string, form: FormData) {
       revalidatePath(`/orders/${orderId}`)
       return { success: true, message: 'Shipment already booked. Order marked as shipped.' }
     }
+    if (order.shipping_booking_state === 'awb_assigned' && order.tracking_number) {
+      return { success: true, message: 'Shipment already created. Schedule pickup manually in Shiprocket.' }
+    }
     const { data: customer, error: customerError } = await db.auth.admin.getUserById(order.user_id)
     const email = order.shipping_package?.email || customer?.user?.email
     if (customerError && !email) throw new Error('Unable to fetch the customer email for this order.')
@@ -104,16 +107,12 @@ export async function bookOrderShipment(orderId: string, form: FormData) {
       await save({ tracking_number: String(awb.awb_code), courier_name: awb.courier_name || null })
       rejectedRequestState = 'awb_assigned'
     }
-    const pickup = await shiprocketRequest('/courier/generate/pickup', { shipment_id: [Number(shipmentId)] })
-    if (Number(pickup.pickup_status) !== 1) {
-      await save({ shipping_booking_state: 'awb_assigned' })
-      throw new Error('AWB saved; pickup was not confirmed. Check Shiprocket, then continue booking.')
-    }
-    await save({ shipping_booking_state: 'pickup_requested', status: 'shipped' })
+    // Pickup is scheduled manually in Shiprocket after shipment creation.
+    await save({ shipping_booking_state: 'awb_assigned' })
     revalidatePath('/admin/orders')
     revalidatePath('/orders')
     revalidatePath(`/orders/${orderId}`)
-    return { success: true, message: 'Shipment booked, pickup requested and order marked as shipped.' }
+    return { success: true, message: 'Shipment created and courier/AWB assigned. Schedule pickup manually in Shiprocket.' }
   } catch (error) {
     // Only explicit validation rejections can release a lock. Network failures,
     // timeouts and ambiguous server errors still require reconciliation.
