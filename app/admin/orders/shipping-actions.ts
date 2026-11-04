@@ -39,8 +39,8 @@ export async function bookOrderShipment(orderId: string, form: FormData) {
       revalidatePath(`/orders/${orderId}`)
       return { success: true, message: 'Shipment already booked. Order marked as shipped.' }
     }
-    if (order.shipping_booking_state === 'awb_assigned' && order.tracking_number) {
-      return { success: true, message: 'Shipment already created. Schedule pickup manually in Shiprocket.' }
+    if (order.shiprocket_order_id && order.shiprocket_shipment_id && order.shipping_booking_state !== 'booking') {
+      return { success: true, message: 'Order already created in Shiprocket. Open Shiprocket and use Ship Now to choose a courier and arrange pickup.' }
     }
     const { data: customer, error: customerError } = await db.auth.admin.getUserById(order.user_id)
     const email = order.shipping_package?.email || customer?.user?.email
@@ -97,22 +97,12 @@ export async function bookOrderShipment(orderId: string, form: FormData) {
       await save({ shiprocket_order_id: String(result.order_id), shiprocket_shipment_id: shipmentId })
       rejectedRequestState = 'created'
     }
-    if (!order.tracking_number) {
-      const result = await shiprocketRequest('/courier/assign/awb', { shipment_id: shipmentId })
-      const awb = result.response?.data
-      if (Number(result.awb_assign_status) !== 1 || !awb?.awb_code) {
-        await save({ shipping_booking_state: 'created' })
-        throw new Error('Shipment created; AWB assignment failed. Check courier availability and wallet balance, then continue booking.')
-      }
-      await save({ tracking_number: String(awb.awb_code), courier_name: awb.courier_name || null })
-      rejectedRequestState = 'awb_assigned'
-    }
-    // Pickup is scheduled manually in Shiprocket after shipment creation.
-    await save({ shipping_booking_state: 'awb_assigned' })
+    // Leave courier selection, AWB assignment and pickup to Ship Now in Shiprocket.
+    await save({ shipping_booking_state: 'created' })
     revalidatePath('/admin/orders')
     revalidatePath('/orders')
     revalidatePath(`/orders/${orderId}`)
-    return { success: true, message: 'Shipment created and courier/AWB assigned. Schedule pickup manually in Shiprocket.' }
+    return { success: true, message: 'Order created in Shiprocket. Open Orders → New and click Ship Now to choose a courier and arrange pickup.' }
   } catch (error) {
     // Only explicit validation rejections can release a lock. Network failures,
     // timeouts and ambiguous server errors still require reconciliation.
