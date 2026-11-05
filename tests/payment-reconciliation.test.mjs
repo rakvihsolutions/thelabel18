@@ -96,6 +96,36 @@ test('webhook signatures authenticate exact raw bytes with a separate secret', (
   assert.equal(verifyRazorpayWebhook(body, 'not-a-signature', 'webhook-secret'), false)
 })
 
+test('fetching an order payment history paginates beyond Razorpay’s default page', async () => {
+  const urls = []
+  const fetchMock = async url => {
+    urls.push(String(url))
+    const skip = Number(new URL(String(url)).searchParams.get('skip'))
+    const items = skip === 0
+      ? Array.from({ length: 100 }, (_, index) => ({ id: `pay_${index}` }))
+      : [{ id: 'pay_100' }]
+    return { ok: true, json: async () => ({ items }) }
+  }
+  const exports = {}
+  const code = ts.transpileModule(readFileSync(new URL('../lib/razorpay.ts', import.meta.url), 'utf8'), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, esModuleInterop: true },
+  }).outputText
+  vm.runInNewContext(code, {
+    exports,
+    Buffer,
+    AbortSignal,
+    URL,
+    fetch: fetchMock,
+    process: { env: { RAZORPAY_KEY_ID: 'key', RAZORPAY_KEY_SECRET: 'secret' } },
+    require: name => name === 'crypto' ? crypto : (() => { throw new Error(`Unexpected dependency: ${name}`) })(),
+  })
+
+  const result = await exports.fetchRazorpayOrderPayments('order_123')
+  assert.equal(result.items.length, 101)
+  assert.match(urls[0], /\/orders\/order_123\/payments\?count=100&skip=0$/)
+  assert.match(urls[1], /\/orders\/order_123\/payments\?count=100&skip=100$/)
+})
+
 
 test('authorized payments are captured once at the exact order amount and confirmed', async () => {
   const f = fixture({ attempts: [{ ...captured, status: 'authorized' }] })

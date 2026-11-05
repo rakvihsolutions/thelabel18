@@ -106,8 +106,18 @@ export function verifyPaymentSignature(razorpayOrderId: string, razorpayPaymentI
 }
 
 
-export function fetchRazorpayOrderPayments(orderId: string) {
-  return razorpayRequest<{ items: RazorpayPayment[] }>(`/orders/${encodeURIComponent(orderId)}/payments`)
+export async function fetchRazorpayOrderPayments(orderId: string) {
+  const items: RazorpayPayment[] = []
+  const pageSize = 100
+  for (let skip = 0; ; skip += pageSize) {
+    const page = await razorpayRequest<{ items: RazorpayPayment[] }>(
+      `/orders/${encodeURIComponent(orderId)}/payments?count=${pageSize}&skip=${skip}`
+    )
+    if (!Array.isArray(page.items)) throw new Error('Razorpay returned an invalid payment response.')
+    items.push(...page.items)
+    if (page.items.length < pageSize) break
+  }
+  return { items }
 }
 
 export function verifyRazorpayWebhook(body: string, signature: string, secret: string) {
